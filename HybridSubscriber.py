@@ -8,7 +8,7 @@ from origin.client import origin_reciever,origin_reader
 import readStream
 import zmq
 import os
-import json
+import pandas as pd
 
 def poller_loop(sub_addr,sub_list,data_queue,cmd_queue):
     context = zmq.Context()
@@ -26,7 +26,8 @@ def poller_loop(sub_addr,sub_list,data_queue,cmd_queue):
             pass
         try:
             [streamID,content]= sub_sock.recv_multipart()
-            data_queue.put((streamID,json.loads(content)))
+
+            data_queue.put((streamID,pd.Series(content)))
         except zmq.ZMQError as e:
             if e.errno != zmq.EAGAIN:
                 print e
@@ -52,6 +53,7 @@ class HybridSubscriber(origin_reciever.Reciever):
             args=(sub_addr,sub_list,data_queue,self.cmd_queue)
         )
         self.loop.start()
+        self.initialTime = time.time()
 
     def get_stream_filter(self, stream):
         """!@brief Make the appropriate stream filter to subscribe to a stream
@@ -87,14 +89,12 @@ if __name__ == '__main__':
     config.read(configfile)
 
     print "getting reader"
-    read = readStream.readStream()
+    read = readStream.readStream(logging.getLogger(__name__))
     print "getting data"
     stream = "Hybrid_Beam_Balances"
     timeValue = 60
     data = {}
     data[stream] = read.read_streams(stream,stop = time.time()-timeValue)
-    for index,timeValue in enumerate(data[stream]['measurement_time']):
-        data[stream]['measurement_time'][index] = datetime.datetime.fromtimestamp(float(timeValue)/float(2**32))
     read.close()
     print "got data and closed read"
     print data

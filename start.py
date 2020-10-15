@@ -46,19 +46,22 @@ config = ConfigParser.ConfigParser()
 config.read(configfile)
 stream_test_list = ["Hybrid_Mux","Hybrid_Beam_Balances"]
 stream_id_list = {}
+
 def initialData(startTimeSec = 300):
 
     global stream_test_list
     global stream_id_list
     data = {}
-    read = readStream.readStream()
+    read = readStream.readStream(logging.getLogging(__name__))
     #get the data on start up
     print "getting initial data"
+    t = time.time()
     for stream in stream_test_list:
-        data[stream_id_list[stream]] =read.read_streams(stream,start = time.time(),stop = time.time()-startTimeSec) 
-        time.sleep(1)
-        for index,unixTime in enumerate(data[stream_id_list[stream]]['measurement_time']):
-            data[stream_id_list[stream]]['measurement_time'][index] = datetime.datetime.fromtimestamp(float(unixTime)/float(2**32))
+        #a dict of pandas dataFrames 
+        df = read.read_streams(stream,start = t, stop = t-startTimeSec)
+        df['measurement_time'] = pd.to_datetime(df['measurement_time']/float(2**32),unit = "s")
+        data[stream_id_list[stream]] = df
+
     read.close()
     print "got data and closed read"
     return data
@@ -100,11 +103,6 @@ def serve_layout():
                 n_intervals=0,
                 disabled = False
             ),
-            dcc.Interval(
-                id='disableInterval',
-                interval=1*1000, # in milliseconds
-                n_intervals=0
-            ),
             dcc.Slider(
                 id='time-slider',
                 min = 1,
@@ -126,40 +124,19 @@ def serve_layout():
     )
 
 
-@app.callback([Output('interval-component','disabled'),Output('live','data')],
-              [Input('time-slider','value'),
-               Input('disableInterval', 'n_intervals')],
-              [State('interval-component','disabled'),State('interval-component','n_intervals'),
-               State('live','data')])
-def stopInterval(value,n,boolean,nMain,dataLive):
-    ctx = dash.callback_context
-    if "time-slider" in ctx.triggered[0]['prop_id']:
-        print ctx.triggered
-        #then we should turn off auto updates
-        print "disabledi unitl {} is {}".format(n,n+10)
-        return True,n+10
-    elif boolean == True:
-        print n
-        if n == dataLive:
-            print "enabled"
-            return False,None
-        return True,dataLive
-    else:
-        return False,None
-
-
-@app.callback(Output('dataID','data'),
+@app.callback([Output('dataID','data'),OutPut('interval-component','interval')],
               [Input('interval-component', 'n_intervals'),
               Input('time-slider','value')],
-              [State('dataID','data')])
-def updateData(n,timeValue,oldData):
+              [State('dataID','data'),State('interval-component','interval')])
+def updateData(n,timeValue,oldData,interval):
     global data_queue
     global stream_test_list
     global stream_id_list
     ctx = dash.callback_context
     data = {}
     if "time-slider" in ctx.triggered[0]["prop_id"]:
-
+        return oldData,5000
+    elif interval == 5000:
         read = readStream.readStream()
         #get the data on start up
         print "getting data"
@@ -169,7 +146,7 @@ def updateData(n,timeValue,oldData):
                 data[stream_id_list[stream]]['measurement_time'][index] = datetime.datetime.fromtimestamp(float(unixTime)/float(2**32))
         read.close()
         print "got data and closed read"
-        return data
+        return data,1000
     else:
         data = oldData
     #get the data
@@ -184,7 +161,7 @@ def updateData(n,timeValue,oldData):
             else:
                 data[streamID][key].append(mesDict[key])
                 data[streamID][key].pop(0)
-    return data
+    return data,1000
 
 
 
@@ -245,6 +222,8 @@ if __name__ == '__main__':
     sub = hybrid_sub.HybridSubscriber(config,logging.getLogger(__name__),
                                        data_queue, 
                     sub_list = sub)
+    global initialTime 
+    initialTime = sub.initialTime
     for stream in stream_test_list:
         stream_id_list[stream] = sub.get_stream_filter(stream)
     print "running server"
